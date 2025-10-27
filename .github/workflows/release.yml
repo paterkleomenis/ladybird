@@ -1,0 +1,196 @@
+name: Release
+
+on:
+    push:
+        tags:
+            - "v*.*.*"
+    workflow_dispatch:
+        inputs:
+            version:
+                description: "Release version (e.g., v1.0.0)"
+                required: true
+                type: string
+
+permissions:
+    contents: write
+
+concurrency:
+    group: ${{ github.workflow }}-${{ github.ref }}
+    cancel-in-progress: false
+
+jobs:
+    create-release:
+        name: Create Release
+        runs-on: ubuntu-latest
+        outputs:
+            upload_url: ${{ steps.create_release.outputs.upload_url }}
+            version: ${{ steps.get_version.outputs.version }}
+        steps:
+            - name: Get version
+              id: get_version
+              run: |
+                  if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+                    echo "version=${{ inputs.version }}" >> $GITHUB_OUTPUT
+                  else
+                    echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+                  fi
+
+            - name: Create Release
+              id: create_release
+              uses: actions/create-release@v1
+              env:
+                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+              with:
+                  tag_name: ${{ steps.get_version.outputs.version }}
+                  release_name: Ladybird ${{ steps.get_version.outputs.version }}
+                  draft: true
+                  prerelease: true
+                  body: |
+                      ## Ladybird Browser ${{ steps.get_version.outputs.version }}
+
+                      > [!IMPORTANT]
+                      > Ladybird is in a pre-alpha state, and only suitable for use by developers
+
+                      ### Downloads
+
+                      - **Linux (x86_64)**: `ladybird-linux-x86_64-${{ steps.get_version.outputs.version }}.tar.gz`
+                      - **macOS (arm64)**: `ladybird-macos-arm64-${{ steps.get_version.outputs.version }}.tar.gz`
+                      - **Windows (x86_64)**: `ladybird-windows-x86_64-${{ steps.get_version.outputs.version }}.zip`
+
+                      ### Installation
+
+                      Please refer to the [documentation](https://github.com/${{ github.repository }}/blob/master/Documentation/BuildInstructionsLadybird.md) for system requirements and setup instructions.
+
+                      ### Changes
+
+                      TODO: Add release notes
+
+    build-linux-x86_64:
+        name: Build Linux x86_64
+        needs: create-release
+        runs-on: ubuntu-24.04
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+
+            - name: Install dependencies
+              run: |
+                  sudo apt update
+                  sudo apt install -y autoconf autoconf-archive automake build-essential ccache cmake curl \
+                    fonts-liberation2 git libdrm-dev libgl1-mesa-dev libtool nasm ninja-build pkg-config \
+                    python3-venv qt6-base-dev qt6-tools-dev-tools qt6-wayland tar unzip zip libpulse-dev \
+                    clang-20 lld-20
+
+            - name: Setup ccache
+              uses: actions/cache@v4
+              with:
+                  path: ~/.ccache
+                  key: ccache-linux-x86_64-release-${{ github.sha }}
+                  restore-keys: |
+                      ccache-linux-x86_64-release-
+
+            - name: Build Ladybird
+              run: |
+                  export CC=clang-20
+                  export CXX=clang++-20
+                  cmake --preset Distribution -B Build
+                  cmake --build Build
+                  cmake --install Build --strip --prefix Install
+
+            - name: Create tarball
+              run: |
+                  cd Install
+                  tar -czf ../ladybird-linux-x86_64-${{ needs.create-release.outputs.version }}.tar.gz .
+
+            - name: Upload Release Asset
+              uses: actions/upload-release-asset@v1
+              env:
+                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+              with:
+                  upload_url: ${{ needs.create-release.outputs.upload_url }}
+                  asset_path: ./ladybird-linux-x86_64-${{ needs.create-release.outputs.version }}.tar.gz
+                  asset_name: ladybird-linux-x86_64-${{ needs.create-release.outputs.version }}.tar.gz
+                  asset_content_type: application/gzip
+
+    build-macos-arm64:
+        name: Build macOS arm64
+        needs: create-release
+        runs-on: macos-15
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+
+            - name: Install dependencies
+              run: |
+                  brew install autoconf autoconf-archive automake cmake nasm ninja pkg-config
+
+            - name: Setup ccache
+              uses: actions/cache@v4
+              with:
+                  path: ~/Library/Caches/ccache
+                  key: ccache-macos-arm64-release-${{ github.sha }}
+                  restore-keys: |
+                      ccache-macos-arm64-release-
+
+            - name: Build Ladybird
+              run: |
+                  export CC=$(xcrun --find clang)
+                  export CXX=$(xcrun --find clang++)
+                  cmake --preset Distribution -B Build
+                  cmake --build Build
+                  cmake --install Build --strip --prefix Install
+
+            - name: Create tarball
+              run: |
+                  cd Install
+                  tar -czf ../ladybird-macos-arm64-${{ needs.create-release.outputs.version }}.tar.gz .
+
+            - name: Upload Release Asset
+              uses: actions/upload-release-asset@v1
+              env:
+                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+              with:
+                  upload_url: ${{ needs.create-release.outputs.upload_url }}
+                  asset_path: ./ladybird-macos-arm64-${{ needs.create-release.outputs.version }}.tar.gz
+                  asset_name: ladybird-macos-arm64-${{ needs.create-release.outputs.version }}.tar.gz
+                  asset_content_type: application/gzip
+
+    build-windows-x86_64:
+        name: Build Windows x86_64
+        needs: create-release
+        runs-on: windows-2025
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+
+            - name: Setup MSVC
+              uses: ilammy/msvc-dev-cmd@v1
+
+            - name: Setup ccache
+              uses: actions/cache@v4
+              with:
+                  path: ~\AppData\Local\ccache
+                  key: ccache-windows-x86_64-release-${{ github.sha }}
+                  restore-keys: |
+                      ccache-windows-x86_64-release-
+
+            - name: Build Ladybird
+              run: |
+                  cmake --preset Distribution -B Build -DENABLE_CI_BASELINE_CPU=ON
+                  cmake --build Build --config Release
+                  cmake --install Build --config Release --strip --prefix Install
+
+            - name: Create zip
+              run: |
+                  cd Install
+                  7z a -tzip ../ladybird-windows-x86_64-${{ needs.create-release.outputs.version }}.zip *
+
+            - name: Upload Release Asset
+              uses: actions/upload-release-asset@v1
+              env:
+                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+              with:
+                  upload_url: ${{ needs.create-release.outputs.upload_url }}
+                  asset_path: ./ladybird-windows-x86_64-${{ needs.create-release.outputs.version }}.zip
+                  asset_name: ladybird-windows-x86_64-${{ needs.create-release.outputs.version }}.zip
+                  asset_content_type: application/zip
