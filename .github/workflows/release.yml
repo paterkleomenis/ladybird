@@ -176,9 +176,9 @@ jobs:
 
             - name: Build Ladybird
               run: |
-                  cmake --preset Distribution -B Build -DENABLE_CI_BASELINE_CPU=ON
+                  cmake --preset Windows_CI -B Build
                   cmake --build Build --config Release
-                  cmake --install Build --config Release --strip --prefix Install
+                  cmake --install Build --config Release --prefix Install
 
             - name: Create zip
               run: |
