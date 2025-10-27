@@ -18,6 +18,11 @@ concurrency:
     group: ${{ github.workflow }}-${{ github.ref }}
     cancel-in-progress: false
 
+env:
+    LADYBIRD_SOURCE_DIR: ${{ github.workspace }}
+    CCACHE_DIR: ${{ github.workspace }}/.ccache
+    VCPKG_ROOT: ${{ github.workspace }}/Build/vcpkg
+
 jobs:
     create-release:
         name: Create Release
@@ -73,26 +78,36 @@ jobs:
             - name: Checkout code
               uses: actions/checkout@v4
 
-            - name: Install dependencies
-              run: |
-                  sudo apt update
-                  sudo apt install -y autoconf autoconf-archive automake build-essential ccache cmake curl \
-                    fonts-liberation2 git libdrm-dev libgl1-mesa-dev libtool nasm ninja-build pkg-config \
-                    python3-venv qt6-base-dev qt6-tools-dev-tools qt6-wayland tar unzip zip libpulse-dev \
-                    clang-20 lld-20
+            - name: Set Up Environment
+              uses: ./.github/actions/setup
+              with:
+                  os: Linux
+                  arch: x86_64
+                  toolchain: Clang
 
             - name: Setup ccache
               uses: actions/cache@v4
               with:
-                  path: ~/.ccache
+                  path: ${{ env.CCACHE_DIR }}
                   key: ccache-linux-x86_64-release-${{ github.sha }}
                   restore-keys: |
                       ccache-linux-x86_64-release-
 
+            - name: Restore Caches
+              uses: ./.github/actions/cache-restore
+              id: cache-restore
+              with:
+                  runner_labels: '["ubuntu-24.04"]'
+                  os: Linux
+                  arch: x86_64
+                  toolchain: Clang
+                  cache_key_extra: Distribution
+                  ccache_path: ${{ env.CCACHE_DIR }}
+                  download_cache_path: ${{ github.workspace }}/Build/caches
+                  vcpkg_cache_path: ${{ github.workspace }}/Build/caches/vcpkg-binary-cache
+
             - name: Build Ladybird
               run: |
-                  export CC=clang-20
-                  export CXX=clang++-20
                   cmake --preset Distribution -B Build
                   cmake --build Build
                   cmake --install Build --strip --prefix Install
@@ -120,22 +135,36 @@ jobs:
             - name: Checkout code
               uses: actions/checkout@v4
 
-            - name: Install dependencies
-              run: |
-                  brew install autoconf autoconf-archive automake cmake nasm ninja pkg-config
+            - name: Set Up Environment
+              uses: ./.github/actions/setup
+              with:
+                  os: macOS
+                  arch: arm64
+                  toolchain: Clang
 
             - name: Setup ccache
               uses: actions/cache@v4
               with:
-                  path: ~/Library/Caches/ccache
+                  path: ${{ env.CCACHE_DIR }}
                   key: ccache-macos-arm64-release-${{ github.sha }}
                   restore-keys: |
                       ccache-macos-arm64-release-
 
+            - name: Restore Caches
+              uses: ./.github/actions/cache-restore
+              id: cache-restore
+              with:
+                  runner_labels: '["macos-15"]'
+                  os: macOS
+                  arch: arm64
+                  toolchain: Clang
+                  cache_key_extra: Distribution
+                  ccache_path: ${{ env.CCACHE_DIR }}
+                  download_cache_path: ${{ github.workspace }}/Build/caches
+                  vcpkg_cache_path: ${{ github.workspace }}/Build/caches/vcpkg-binary-cache
+
             - name: Build Ladybird
               run: |
-                  export CC=$(xcrun --find clang)
-                  export CXX=$(xcrun --find clang++)
                   cmake --preset Distribution -B Build
                   cmake --build Build
                   cmake --install Build --strip --prefix Install
@@ -163,16 +192,33 @@ jobs:
             - name: Checkout code
               uses: actions/checkout@v4
 
-            - name: Setup MSVC
-              uses: ilammy/msvc-dev-cmd@v1
+            - name: Set Up Environment
+              uses: ./.github/actions/setup
+              with:
+                  os: Windows
+                  arch: x86_64
+                  toolchain: ClangCL
 
             - name: Setup ccache
               uses: actions/cache@v4
               with:
-                  path: ~\AppData\Local\ccache
+                  path: ${{ env.CCACHE_DIR }}
                   key: ccache-windows-x86_64-release-${{ github.sha }}
                   restore-keys: |
                       ccache-windows-x86_64-release-
+
+            - name: Restore Caches
+              uses: ./.github/actions/cache-restore
+              id: cache-restore
+              with:
+                  runner_labels: '["windows-2025"]'
+                  os: Windows
+                  arch: x86_64
+                  toolchain: ClangCL
+                  cache_key_extra: Windows_CI
+                  ccache_path: ${{ env.CCACHE_DIR }}
+                  download_cache_path: ${{ github.workspace }}/Build/caches
+                  vcpkg_cache_path: ${{ github.workspace }}/Build/caches/vcpkg-binary-cache
 
             - name: Build Ladybird
               run: |
